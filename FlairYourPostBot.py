@@ -1,10 +1,24 @@
+import os, sys
 import praw
 import asyncio
+from concurrent.futures import ProcessPoolExecutor
 import traceback
 
 from datetime import timedelta
-from time import time
+from time import time, sleep
 from collections import OrderedDict
+
+# Custom logging
+try:
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__),"..")))
+    from utils import log
+
+except:
+    import logging
+    log = logging.getLogger(__name__)
+    log.setLevel(logging.DEBUG)
+
+    log.addHandler(logging.StreamHandler(sys.stdout))
 
 try:
     from asyncio import ensure_future
@@ -12,9 +26,7 @@ except ImportError:
     ensure_future = asyncio.async
 
 
-username = "USERNAME"
-password = "PASSWORD"
-subreddit_name = "mod"
+subreddit_name = "amd"
 
 
 '''
@@ -28,13 +40,9 @@ subreddit_name = "mod"
 `no_flair` : Posts that still have a grace period to add a flair`
 '''
 
-sleep_time = 10
-time_until_message = 180
-time_until_remove = 600
+time_until_message = 60
+time_until_remove = 1200
 h_time_until_remove = str(timedelta(seconds=time_until_remove))
-post_grab_limit = 20
-post_memory_limit = 100
-posts_to_forget = post_memory_limit - post_grab_limit
 
 add_flair_subject_line = "You have not tagged your post."
 add_flair_message = ("[Your recent post]({post_url}) does not have any flair and will soon be removed.\n\n"
@@ -46,11 +54,12 @@ add_flair_message = ("[Your recent post]({post_url}) does not have any flair and
 remove_post_subject_line = "You have not tagged your post within the allotted amount of time."
 remove_post_message = "[Your recent post]({post_url}) still does not have any flair and will remain removed, feel free to resubmit your post and remember to flair it once it is posted.*"
 
-no_flair = OrderedDict()
-user_agent = ("Auto flair moderator for reddit created by /u/kooldawgstar") # tells reddit the bot's purpose.
-session = praw.Reddit(user_agent=user_agent)
-session.login(username=username, password=password, disable_warning=True)
-subreddit = session.get_subreddit(subreddit_name)
+tech_support_subject_line = "Tech support removed"
+tech_support_message = "Hello, I see you have a tech support problem. For the best chance at resolving your issue, please post it in our monthly tech support megathread, /r/AMDHelp, or /r/techsupport"
+
+user_agent = ("/r/AMD bot by /u/RenegadeAI") # tells reddit the bot's purpose.
+reddit = praw.Reddit('AMD', user_agent=user_agent)
+subreddit = reddit.subreddit(subreddit_name)
 
 
 @asyncio.coroutine
@@ -58,69 +67,50 @@ def get_subreddit_settings(name):
     raise NotImplementedError("TODO: Subreddit settings")
 
 
-@asyncio.coroutine
-def refresh_sesison():
-    '''Re-logs in every n seconds'''
-    while True:
-        try:
-            yield from asyncio.sleep(300)
-            session.login(username=username, password=password, disable_warning=True)
-            print("Session refreshed")
-        except Exception as e:
-            print(traceback.format_exc())
-            print("{0}: {1}".format(type(e).__name__, str(e)))
+def submission_handler(submission):
+    # If the submission has Tech support
+    if submission.link_flair_text == 'Tech Support' and submission.author not in subreddit.moderator() and not submission.approved_by:
+        submission.author.message(tech_support_subject_line, tech_support_message)
+        submission.mod.remove()
+        log.debug('Removed tech support {0.shortlink}'.format(submission))
 
-    yield from refresh_sesison()
+    # If submission has no flair
+    elif not submission.link_flair_text:
+        log.debug('New submission: {0.title} {0.shortlink}'.format(submission))
 
+        sleep_time_until_message = time_until_message - (time() - submission.created_utc)
+        sleep_time_until_message = sleep_time_until_message if sleep_time_until_message > 0 else 0
 
-@asyncio.coroutine
-def inbox_stuff():
-    # For lack of a better name
-    '''Looks for mod invites, or if users have replied to the bot's message with a selected flair
-    Refreshes every n seconds
-    '''
-    while True:
-        try:
-            for message in session.get_unread():
-                if message.body.startswith('**gadzooks!'):
-                    print("Checking out possible mod invite")
-                    try:
-                        print("Accepted Invite")
-                        sr = session.get_info(thing_id=message.subreddit.fullname)
-                        sr.accept_moderator_invite()
-                    except AttributeError:  # I cant rememver why I put this here but
-                        print("Tried to parse an invalid invite")
-                        continue
-                    except praw.errors.InvalidInvite:
-                        print("Tried to parse an invalid invite")
-                        continue
-                    message.mark_as_read()
+        final_add_flair_message = add_flair_message.format(post_url=submission.shortlink)
 
-                if message.parent_id:
-                    if message.parent_id[3:] in no_flair:
-                        flaired = False
-                        post = session.get_submission(submission_id=no_flair[message.parent_id[3:]])
-                        choices = post.get_flair_choices()['choices']
-                        for ch in choices:
-                            if message.body == ch['flair_text']:
-                                new_flair = ch['flair_text']
-                                post.set_flair(new_flair)
-                                flaired = True
-                                break
-                        if flaired:
-                            message.reply("Set Flair: **{}**".format(new_flair))
-                        else:
-                            message.reply("Flair **{}** not found".format(message.body))
-                    message.mark_as_read()
+        sleep(sleep_time_until_message)
 
-        except Exception as e:
-            print(traceback.format_exc())
-            print("{0}: {1}".format(type(e).__name__, str(e)))
+        # Check if we have already sent a message
+        sent_messages = [message for message in reddit.inbox.sent() if message.body == final_add_flair_message]
+        if not sent_messages:
+            if reddit.submission(submission.id).link_flair_text:
+                return
 
-        yield from asyncio.sleep(sleep_time)
+            submission.author.message(add_flair_subject_line, final_add_flair_message)
+            log.debug('Sent message for {0.title} {0.shortlink}'.format(submission))
 
-    yield from inbox_stuff()
+            sleep_time_until_remove = time_until_remove - (time() - submission.created_utc)
+            sleep_time_until_remove = sleep_time_until_remove if sleep_time_until_remove > 0 else time_until_remove
 
+        else:
+            log.debug('Already sent message for {0.title} {0.shortlink}'.format(submission))
+
+            sleep_time_until_remove = time_until_remove - (time() - sent_messages[0].created_utc)
+            sleep_time_until_remove = sleep_time_until_remove if sleep_time_until_remove > 0 else 0
+
+        sleep(sleep_time_until_remove)
+
+        if reddit.submission(submission.id).link_flair_text:
+            return
+
+        submission.author.message(remove_post_subject_line, remove_post_message.format(post_url=submission.shortlink))
+        submission.mod.remove()
+        log.debug('Removed {0.title} {0.shortlink}'.format(submission))
 
 @asyncio.coroutine
 def main():
@@ -130,69 +120,24 @@ def main():
     `time_until_remove` seonds. Approves post if a flair is added. Refreshes every n seconds.
     '''
     while True:
-        # Checks to see if storing too much messages
-        if len(no_flair) >= post_memory_limit:
-            i = 0
-            while i < posts_to_forget:
-                no_flair.popitem(0)
-                i += 1
-
         try:
-            for submission in subreddit.get_new(limit=post_grab_limit):
-                # If message has no flair
-                if (submission.link_flair_text is None):
-                    if((time() - submission.created_utc) > time_until_message) and submission.id not in no_flair.values():
-                        final_add_flair_message = add_flair_message.format(post_url=submission.short_link)
-                        print("Sent Message to : {}".format(submission.author))
-                        session.send_message(submission.author, add_flair_subject_line, final_add_flair_message)
-                        for msg in session.get_sent():
-                            if msg.body == final_add_flair_message:
-                                no_flair[msg.id] = submission.id
-                                continue
+            for submission in subreddit.stream.submissions():
+                # print('NEW SUBMISSION: {}'.format(submission.title))
 
-                    if((time() - submission.created_utc) > time_until_remove):
-                        final_remove_post_message = remove_post_message.format(post_url=submission.short_link)
-                        session.send_message(submission.author, remove_post_subject_line, final_remove_post_message)
-                        print("Removed {0.short_link} of {0.author}'s".format(submission))
-                        for k in list(no_flair.keys()):
-                            if no_flair[k] == submission.id:
-                                no_flair.pop(k)
-                        submission.remove()
-                        continue
-                        # Keeps track of how many posts the bot removed
-                        f = open('NumberRemoved','a')
-                        f.write('1\n')
-                        f.close()
-                #
-                if submission.id in no_flair.values() and submission.link_flair_text:
-                    submission.approve()
-                    print("Approved {0.short_link} of {0.author}'s".format(submission))
-                    for k in list(no_flair.keys()):
-                        if no_flair[k] == submission.id:
-                            no_flair.pop(k)
-                    continue
+                # Creates background task
+                ensure_future(loop.run_in_executor(executor, submission_handler(submission)))
+
         except Exception as e:
-            print(traceback.format_exc())
-            print("{0}: {1}".format(type(e).__name__, str(e)))
-
-        yield from asyncio.sleep(sleep_time)
-
-    yield from main()
+            log.critical('Error in submission_handler: {}'.format(e))
 
 if __name__ == "__main__":
     # Puts main func into a loop and runs forever
+    executor = ProcessPoolExecutor(2)
     loop = asyncio.get_event_loop()
-
-    print("Registering session refresh\n")
-    ensure_future(refresh_sesison())
-
-    print("Registering Mod Invites\n")
-    ensure_future(inbox_stuff())
 
     print("Registering Main\n")
     ensure_future(main())
 
-    print("\nStarting...\n")
     loop.run_forever()
 
     loop.close()
