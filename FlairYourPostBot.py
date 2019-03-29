@@ -66,13 +66,18 @@ subreddit = reddit.subreddit(subreddit_name)
 def get_subreddit_settings(name):
     raise NotImplementedError("TODO: Subreddit settings")
 
-
-def submission_handler(submission):
+def check_if_ts(submission):
     # If the submission has Tech support
     if submission.link_flair_text == 'Tech Support' and submission.author not in subreddit.moderator() and not submission.approved_by:
         submission.author.message(tech_support_subject_line, tech_support_message)
         submission.mod.remove()
         log.debug('Removed tech support {0.shortlink}'.format(submission))
+
+        return True
+
+def submission_handler(submission):
+    if check_if_ts(submission):
+        return
 
     # If submission has no flair
     elif not submission.link_flair_text:
@@ -106,6 +111,8 @@ def submission_handler(submission):
         sleep(sleep_time_until_remove)
 
         if reddit.submission(submission.id).link_flair_text:
+            check_if_ts(reddit.submission(submission.id))
+
             return
 
         submission.author.message(remove_post_subject_line, remove_post_message.format(post_url=submission.shortlink))
