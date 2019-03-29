@@ -23,7 +23,7 @@ except:
 try:
     from asyncio import ensure_future
 except ImportError:
-    ensure_future = asyncio.async
+    ensure_future = getattr(asyncio, 'async')
 
 
 subreddit_name = "amd"
