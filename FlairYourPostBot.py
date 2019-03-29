@@ -8,17 +8,7 @@ from datetime import timedelta
 from time import time, sleep
 from collections import OrderedDict
 
-# Custom logging
-try:
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__),"..")))
-    from utils import log
-
-except:
-    import logging
-    log = logging.getLogger(__name__)
-    log.setLevel(logging.DEBUG)
-
-    log.addHandler(logging.StreamHandler(sys.stdout))
+from derw import log
 
 try:
     from asyncio import ensure_future

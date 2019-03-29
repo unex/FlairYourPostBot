@@ -8,6 +8,7 @@ verify_ssl = true
 [packages]
 asyncio = "*"
 praw = "*"
+derw = {git = "https://github.com/notderw/python-util"}
 
 [requires]
 python_version = "3.7"
