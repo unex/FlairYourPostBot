@@ -9,6 +9,7 @@ verify_ssl = true
 asyncio = "*"
 praw = "*"
 derw = {git = "https://github.com/notderw/python-util"}
+colorama = "*"
 
 [requires]
 python_version = "3.7"
