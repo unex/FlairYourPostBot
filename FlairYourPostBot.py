@@ -44,13 +44,11 @@ add_flair_message = ("[Your recent post]({post_url}) does not have any flair and
 remove_post_subject_line = "You have not tagged your post within the allotted amount of time."
 remove_post_message = "[Your recent post]({post_url}) still does not have any flair and will remain removed, feel free to resubmit your post and remember to flair it once it is posted.*"
 
-tech_support_subject_line = "Tech support removed"
-tech_support_message = "Hello, I see you have a tech support problem. For the best chance at resolving your issue, please post it in our monthly tech support megathread, /r/AMDHelp, or /r/techsupport"
+tech_support_id = "11jax1al0ecia"
 
 user_agent = ("/r/AMD bot by /u/RenegadeAI") # tells reddit the bot's purpose.
-reddit = praw.Reddit('AMD', user_agent=user_agent)
+reddit = praw.Reddit('AMD', user_agent=user_agent) # scopes: identity, modcontributors (for subreddit.mod.removal_reasons?!?!?), modposts, privatemessages, read, submit
 subreddit = reddit.subreddit(subreddit_name)
-
 
 @asyncio.coroutine
 def get_subreddit_settings(name):
@@ -59,8 +57,14 @@ def get_subreddit_settings(name):
 def check_if_ts(submission):
     # If the submission has Tech support
     if submission.link_flair_text == 'Tech Support' and submission.author not in subreddit.moderator() and not submission.approved_by:
-        submission.author.message(tech_support_subject_line, tech_support_message)
-        submission.mod.remove()
+        tech_support_message = subreddit.mod.removal_reasons[tech_support_id].message # idk this is lazy
+
+        comment = submission.reply(tech_support_message)
+        comment.mod.distinguish(sticky=True)
+
+        submission.mod.remove(reason_id=tech_support_id)
+        submission.mod.lock()
+
         log.debug('Removed tech support {0.shortlink}'.format(submission))
 
         return True
